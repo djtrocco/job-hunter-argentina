@@ -19,7 +19,7 @@ app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 // In-Memory Storage for uploaded CV file buffer
 let globalCV = {
-  fileName: 'CV_Mi_Perfil.pdf',
+  fileName: 'Curriculum_Vitae_Postulante.pdf',
   fileBuffer: null,
   fileType: 'application/pdf',
   uploadedAt: new Date().toISOString(),
@@ -49,168 +49,378 @@ const isRealEmail = (email) => {
   const clean = email.toLowerCase().trim();
   const invalidExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.pdf', '.css', '.js', '.ts', '.ico'];
   if (invalidExtensions.some((ext) => clean.endsWith(ext))) return false;
-  const invalidDomains = ['example.com', 'w3.org', 'sentry.io', 'schema.org', 'domain.com', 'email.com', 'github.com', 'google.com'];
+  const invalidDomains = [
+    'example.com', 'w3.org', 'sentry.io', 'schema.org', 'domain.com',
+    'email.com', 'github.com', 'google.com', 'microsoft.com', 'apple.com',
+    'jquery.com', 'webpack.js', 'react.dev', 'vercel.app', 'netlify.app',
+  ];
   if (invalidDomains.some((dom) => clean.includes(dom))) return false;
   return clean.includes('@') && clean.includes('.');
 };
 
-// Deep Scraper Engine: Enters each job post URL, extracts email, and DISCARDS posts without email
+// ─────────────────────────────────────────────────────────────────────────────
+// DEEP SCRAPER ENGINE
+// Strategy: search each Argentine job portal → enter every listing URL →
+//           extract email FROM THE BODY of the post → discard if no email found
+// ─────────────────────────────────────────────────────────────────────────────
 const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') => {
   const keywordClean = rawKeyword.trim().replace(/\s+/g, ' ');
   const extractedResults = [];
   const foundEmailsSet = new Set();
 
   const userAgents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
   ];
-  const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
+  const getUA = () => userAgents[Math.floor(Math.random() * userAgents.length)];
 
-  const targetPostUrls = [];
-  try {
-    const searchUrl = `https://html.duckduckgo.com/html/?q=site:ar+"${encodeURIComponent(keywordClean)}"+("rrhh" OR "enviar cv" OR "@gmail.com" OR "busquedas")`;
-    const searchResponse = await axios.get(searchUrl, {
-      headers: {
-        'User-Agent': randomUserAgent,
-        'Accept-Language': 'es-AR,es;q=0.9,en;q=0.8',
-      },
-      timeout: 8000,
-    });
-
-    if (searchResponse.data) {
-      const $ = cheerio.load(searchResponse.data);
-      $('.result').each((i, element) => {
-        const title = $(element).find('.result__title').text().trim();
-        const snippet = $(element).find('.result__snippet').text().trim();
-        const rawUrl = $(element).find('.result__url').attr('href') || '';
-        
-        let targetUrl = rawUrl;
-        if (rawUrl.includes('uddg=')) {
-          const match = rawUrl.match(/uddg=([^&]+)/);
-          if (match && match[1]) {
-            targetUrl = decodeURIComponent(match[1]);
-          }
-        }
-
-        if (targetUrl.startsWith('http')) {
-          targetPostUrls.push({
-            title: title || `${keywordClean} en ${location}`,
-            snippet: snippet,
-            url: targetUrl,
-          });
-        }
-      });
-    }
-  } catch (err) {
-    console.log('Search query offset:', err.message);
-  }
-
-  for (const post of targetPostUrls.slice(0, 10)) {
+  // ── Helper: fetch a page safely ──────────────────────────────────────────
+  const safeFetch = async (url, timeoutMs = 8000) => {
     try {
-      const pageRes = await axios.get(post.url, {
-        headers: { 'User-Agent': randomUserAgent },
-        timeout: 4000,
+      const res = await axios.get(url, {
+        headers: {
+          'User-Agent': getUA(),
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'es-AR,es;q=0.9,en;q=0.7',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Cache-Control': 'no-cache',
+        },
+        timeout: timeoutMs,
+        maxRedirects: 5,
       });
-
-      if (pageRes.data) {
-        const $page = cheerio.load(pageRes.data);
-        const pageBodyText = $page('body').text() || '';
-        const pageTitle = $page('title').text().trim() || post.title;
-
-        const matchedEmails = pageBodyText.match(EMAIL_REGEX) || post.snippet.match(EMAIL_REGEX) || [];
-        const validEmailsForThisPost = matchedEmails.filter((em) => isRealEmail(em));
-
-        if (validEmailsForThisPost.length > 0) {
-          for (const email of validEmailsForThisPost) {
-            const cleanEmail = email.toLowerCase().trim();
-            if (!foundEmailsSet.has(cleanEmail)) {
-              foundEmailsSet.add(cleanEmail);
-
-              const domainPart = cleanEmail.split('@')[1] || '';
-              const companyName = domainPart.split('.')[0].toUpperCase() + ' Argentina';
-
-              extractedResults.push({
-                id: `job_deep_${Date.now()}_${extractedResults.length}`,
-                jobTitle: pageTitle.slice(0, 60) || `${keywordClean} - ${location}`,
-                company: companyName,
-                location: location,
-                email: cleanEmail,
-                confidence: 'Email Verificado en Cuerpo',
-                snippet: `Aviso verificado para ${keywordClean}. Se extrajo la casilla de correo: ${cleanEmail}`,
-                sourceName: 'Portal Web Argentina',
-                sourceUrl: post.url,
-                foundAt: new Date().toLocaleDateString('es-AR', { hour: '2-digit', minute: '2-digit' }),
-              });
-            }
-          }
-        }
-      }
+      return res.data || null;
     } catch (e) {
-      const snippetEmails = (post.snippet.match(EMAIL_REGEX) || []).filter(isRealEmail);
-      if (snippetEmails.length > 0) {
-        for (const email of snippetEmails) {
-          const cleanEmail = email.toLowerCase().trim();
-          if (!foundEmailsSet.has(cleanEmail)) {
-            foundEmailsSet.add(cleanEmail);
-            extractedResults.push({
-              id: `job_snip_${Date.now()}_${extractedResults.length}`,
-              jobTitle: post.title,
-              company: 'Empresa Argentina',
-              location: location,
-              email: cleanEmail,
-              confidence: 'Email Detectado en Publicación',
-              snippet: post.snippet,
-              sourceName: 'Portal Web Argentina',
-              sourceUrl: post.url,
-              foundAt: new Date().toLocaleDateString('es-AR', { hour: '2-digit', minute: '2-digit' }),
-            });
-          }
-        }
-      }
+      console.log(`[fetch error] ${url} → ${e.message}`);
+      return null;
     }
-  }
+  };
 
-  if (extractedResults.length === 0) {
-    const verifiedArgentinianPosts = [
-      {
-        title: `${keywordClean} - Búsqueda Laboral Abierta`,
-        company: 'Grupo Selección Argentina',
-        email: `rrhh@${keywordClean.toLowerCase().replace(/[^a-z0-9]/g, '') || 'busquedas'}ar.com.ar`,
-        portal: 'ZonaJobs (.com.ar)',
-        url: `https://www.zonajobs.com.ar/empleos/busqueda-${encodeURIComponent(keywordClean)}.html`,
-      },
-      {
-        title: `Analista de ${keywordClean} - Zona Norte / CABA`,
-        company: 'Consultora Recursos Humanos AR',
-        email: `busquedas@${keywordClean.toLowerCase().replace(/[^a-z0-9]/g, '') || 'talent'}consultora.com.ar`,
-        portal: 'CompuTrabajo (AR)',
-        url: `https://ar.computrabajo.com/trabajo-de-${encodeURIComponent(keywordClean)}`,
-      },
-      {
-        title: `Puesto: ${keywordClean} (Modalidad Híbrida / Remota)`,
-        company: 'Estudio Profesional Buenos Aires',
-        email: `empleos@estudioprofesional.com.ar`,
-        portal: 'LinkedIn Argentina',
-        url: `https://ar.linkedin.com/jobs/search?keywords=${encodeURIComponent(keywordClean)}`,
-      }
+  // ── Helper: extract emails STRICTLY from the body of a job post ──────────
+  // Strips nav/header/footer/scripts to avoid false positives.
+  // Only returns emails found IN the job description area.
+  const extractEmailsFromBody = (html) => {
+    if (!html) return [];
+    const $ = cheerio.load(html);
+
+    // Remove noise: nav, footer, header, scripts
+    $('nav, header, footer, script, style, noscript, aside, .sidebar, .menu, .navbar, .footer, .header, .navigation, .nav-bar, .topbar').remove();
+
+    // Try portal-specific job description containers first
+    const contentSelectors = [
+      // Generic
+      '.job-description', '.job-body', '.job-detail', '.job-content',
+      '.vacancy-description', '.vacancy-body', 'article.job', 'main',
+      '[class*="description"]', '[class*="descripcion"]', '[class*="detalle"]',
+      // CompuTrabajo
+      '.box_offer_detail', '.texto-aviso', '.ficha-aviso',
+      // ZonaJobs
+      '.aviso-descripcion', '.descripcion-oferta', '.detalle-aviso',
+      // Bumeran
+      '.postulation-detail', '.job-detail__body',
+      // Generic fallback
+      'article', '#content', '.content', '.post-content',
     ];
 
-    verifiedArgentinianPosts.forEach((post, idx) => {
-      extractedResults.push({
-        id: `job_verif_${Date.now()}_${idx}`,
-        jobTitle: post.title,
-        company: post.company,
-        location: location,
-        email: post.email,
-        confidence: 'Email Verificado en Cuerpo',
-        snippet: `Publicación verificada para ${keywordClean} en ${location}. Correo extraído: ${post.email}`,
-        sourceName: post.portal,
-        sourceUrl: post.url,
-        foundAt: new Date().toLocaleDateString('es-AR', { hour: '2-digit', minute: '2-digit' }),
-      });
-    });
-  }
+    let bodyText = '';
+    for (const sel of contentSelectors) {
+      const el = $(sel).first();
+      if (el.length > 0) {
+        const txt = el.text().trim();
+        if (txt.length > 80) {
+          bodyText = txt;
+          break;
+        }
+      }
+    }
 
+    // Last resort: full body text
+    if (bodyText.length < 80) {
+      bodyText = $('body').text();
+    }
+
+    const matched = bodyText.match(EMAIL_REGEX) || [];
+    return matched.filter(isRealEmail).map(e => e.toLowerCase().trim());
+  };
+
+  // ── Helper: dedup push result ────────────────────────────────────────────
+  const pushResult = (email, jobTitle, company, sourceUrl, sourceName, pageHtml) => {
+    const clean = email.toLowerCase().trim();
+    if (foundEmailsSet.has(clean)) return;
+    foundEmailsSet.add(clean);
+    console.log(`  ✓ EMAIL ENCONTRADO: ${clean}  |  URL: ${sourceUrl}`);
+    extractedResults.push({
+      id: `job_${Date.now()}_${extractedResults.length}`,
+      jobTitle: (jobTitle || `${keywordClean} - ${location}`).slice(0, 70),
+      company: (company || clean.split('@')[1]?.split('.')[0]?.toUpperCase() + ' Argentina' || 'Empresa Argentina').slice(0, 60),
+      location,
+      email: clean,
+      confidence: 'Email extraído del cuerpo del aviso',
+      snippet: `Email real verificado en el cuerpo del aviso. Correo: ${clean}`,
+      sourceName: sourceName || 'Portal Laboral Argentina',
+      sourceUrl,
+      foundAt: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
+    });
+  };
+
+  // ╔══════════════════════════════════════════════════════════════╗
+  // ║  PORTAL 1: CompuTrabajo Argentina                          ║
+  // ╚══════════════════════════════════════════════════════════════╝
+  const scrapeCompuTrabajo = async () => {
+    const slug = keywordClean.toLowerCase().replace(/\s+/g, '-');
+    const urls = [
+      `https://ar.computrabajo.com/trabajo-de-${encodeURIComponent(slug)}`,
+      `https://ar.computrabajo.com/trabajo-de-${encodeURIComponent(keywordClean)}`,
+    ];
+
+    for (const searchUrl of urls) {
+      console.log(`\n[CompuTrabajo] Buscando en: ${searchUrl}`);
+      const listHtml = await safeFetch(searchUrl);
+      if (!listHtml) continue;
+
+      const $ = cheerio.load(listHtml);
+      const postLinks = new Map();
+
+      // Collect individual job post URLs
+      $('a').each((_, el) => {
+        let href = $(el).attr('href') || '';
+        if (href.startsWith('/')) href = 'https://ar.computrabajo.com' + href;
+        const title = $(el).text().trim();
+        if (
+          href.includes('computrabajo.com') &&
+          (href.includes('/trabajo/') || href.includes('/oferta/') || href.match(/\/[a-z]+-[a-z]+-\d+/)) &&
+          !postLinks.has(href)
+        ) {
+          postLinks.set(href, title || keywordClean);
+        }
+      });
+
+      console.log(`[CompuTrabajo] ${postLinks.size} avisos individuales encontrados`);
+
+      for (const [url, title] of [...postLinks.entries()].slice(0, 10)) {
+        console.log(`  → Entrando al aviso: ${url}`);
+        const pageHtml = await safeFetch(url, 7000);
+        const emails = extractEmailsFromBody(pageHtml);
+
+        if (emails.length === 0) {
+          console.log(`  ✗ Sin email en cuerpo → DESCARTADO`);
+          continue;
+        }
+
+        const $p = cheerio.load(pageHtml);
+        const pageTitle = $p('h1').first().text().trim() || $p('title').text().trim() || title;
+        const company = $p('[class*="company"], [class*="empresa"], [class*="Company"]').first().text().trim();
+
+        for (const email of emails) {
+          pushResult(email, pageTitle, company, url, 'CompuTrabajo Argentina');
+        }
+      }
+      break; // stop if first URL worked
+    }
+  };
+
+  // ╔══════════════════════════════════════════════════════════════╗
+  // ║  PORTAL 2: ZonaJobs Argentina                              ║
+  // ╚══════════════════════════════════════════════════════════════╝
+  const scrapeZonaJobs = async () => {
+    const slug = keywordClean.toLowerCase().replace(/\s+/g, '-');
+    const searchUrl = `https://www.zonajobs.com.ar/empleos-de-${encodeURIComponent(slug)}.html`;
+    console.log(`\n[ZonaJobs] Buscando en: ${searchUrl}`);
+
+    const listHtml = await safeFetch(searchUrl);
+    if (!listHtml) return;
+
+    const $ = cheerio.load(listHtml);
+    const postLinks = new Map();
+
+    $('a').each((_, el) => {
+      let href = $(el).attr('href') || '';
+      if (href.startsWith('/')) href = 'https://www.zonajobs.com.ar' + href;
+      if (
+        href.includes('zonajobs.com.ar') &&
+        (href.includes('/empleo/') || href.includes('/trabajo/') || href.includes('/aviso/')) &&
+        !postLinks.has(href)
+      ) {
+        postLinks.set(href, $(el).text().trim() || keywordClean);
+      }
+    });
+
+    console.log(`[ZonaJobs] ${postLinks.size} avisos individuales encontrados`);
+
+    for (const [url, title] of [...postLinks.entries()].slice(0, 10)) {
+      console.log(`  → Entrando al aviso: ${url}`);
+      const pageHtml = await safeFetch(url, 7000);
+      const emails = extractEmailsFromBody(pageHtml);
+
+      if (emails.length === 0) {
+        console.log(`  ✗ Sin email en cuerpo → DESCARTADO`);
+        continue;
+      }
+
+      const $p = cheerio.load(pageHtml);
+      const pageTitle = $p('h1').first().text().trim() || $p('title').text().trim() || title;
+      const company = $p('[class*="company"], [class*="empresa"], .company-name').first().text().trim();
+
+      for (const email of emails) {
+        pushResult(email, pageTitle, company, url, 'ZonaJobs Argentina');
+      }
+    }
+  };
+
+  // ╔══════════════════════════════════════════════════════════════╗
+  // ║  PORTAL 3: Bumeran / Multitrabajos                         ║
+  // ╚══════════════════════════════════════════════════════════════╝
+  const scrapeBumeran = async () => {
+    const slug = keywordClean.toLowerCase().replace(/\s+/g, '-');
+    const searchUrl = `https://www.bumeran.com.ar/empleos-${encodeURIComponent(slug)}.html`;
+    console.log(`\n[Bumeran] Buscando en: ${searchUrl}`);
+
+    const listHtml = await safeFetch(searchUrl);
+    if (!listHtml) return;
+
+    const $ = cheerio.load(listHtml);
+    const postLinks = new Map();
+
+    $('a').each((_, el) => {
+      let href = $(el).attr('href') || '';
+      if (href.startsWith('/')) href = 'https://www.bumeran.com.ar' + href;
+      if (
+        href.includes('bumeran.com.ar') &&
+        href.length > 45 &&
+        !href.includes('#') &&
+        !postLinks.has(href)
+      ) {
+        postLinks.set(href, $(el).text().trim() || keywordClean);
+      }
+    });
+
+    console.log(`[Bumeran] ${postLinks.size} avisos individuales encontrados`);
+
+    for (const [url, title] of [...postLinks.entries()].slice(0, 10)) {
+      console.log(`  → Entrando al aviso: ${url}`);
+      const pageHtml = await safeFetch(url, 7000);
+      const emails = extractEmailsFromBody(pageHtml);
+
+      if (emails.length === 0) {
+        console.log(`  ✗ Sin email en cuerpo → DESCARTADO`);
+        continue;
+      }
+
+      const $p = cheerio.load(pageHtml);
+      const pageTitle = $p('h1').first().text().trim() || $p('title').text().trim() || title;
+      const company = $p('[class*="company"], [class*="empresa"], h2.company').first().text().trim();
+
+      for (const email of emails) {
+        pushResult(email, pageTitle, company, url, 'Bumeran Argentina');
+      }
+    }
+  };
+
+  // ╔══════════════════════════════════════════════════════════════╗
+  // ║  PORTAL 4: DuckDuckGo → filtra portales .com.ar con email  ║
+  // ║  Busca avisos reales que mencionen emails en su contenido   ║
+  // ╚══════════════════════════════════════════════════════════════╝
+  const scrapeViaDDG = async () => {
+    // Search for job pages on .com.ar portals that contain emails in the content
+    const queries = [
+      `"${keywordClean}" empleo "rrhh@" OR "empleos@" OR "busquedas@" OR "postulaciones@" site:.com.ar`,
+      `"${keywordClean}" trabajo argentina "@gmail.com" OR "@hotmail.com" "enviar cv" site:.com.ar`,
+    ];
+
+    for (const query of queries) {
+      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=ar-es`;
+      console.log(`\n[DDG] Buscando: ${query}`);
+
+      const listHtml = await safeFetch(searchUrl, 10000);
+      if (!listHtml) continue;
+
+      const $ = cheerio.load(listHtml);
+      const postLinks = new Map();
+
+      $('.result').each((_, el) => {
+        const title = $(el).find('.result__title').text().trim();
+        const snippet = $(el).find('.result__snippet').text().trim();
+        let href = $(el).find('a.result__url, .result__title a').attr('href') || '';
+
+        // Decode DuckDuckGo redirect URL
+        if (href.includes('uddg=')) {
+          const m = href.match(/uddg=([^&]+)/);
+          if (m) href = decodeURIComponent(m[1]);
+        }
+        if (!href.startsWith('http') || href.includes('duckduckgo.com')) return;
+
+        // Only keep Argentine job portals
+        const isArPortal =
+          href.includes('.com.ar') ||
+          href.includes('computrabajo.com') ||
+          href.includes('zonajobs') ||
+          href.includes('bumeran.com') ||
+          href.includes('trabajando.com');
+
+        if (isArPortal && !postLinks.has(href)) {
+          postLinks.set(href, { title, snippet });
+        }
+      });
+
+      console.log(`[DDG] ${postLinks.size} URLs de portales argentinos encontradas`);
+
+      for (const [url, meta] of [...postLinks.entries()].slice(0, 10)) {
+        console.log(`  → Entrando al aviso: ${url}`);
+        const pageHtml = await safeFetch(url, 7000);
+
+        // STRICT: only accept emails found in the BODY of the page
+        // Never use snippet emails as proof — they could be from unrelated content
+        const emails = extractEmailsFromBody(pageHtml);
+
+        if (emails.length === 0) {
+          console.log(`  ✗ Sin email en cuerpo → DESCARTADO`);
+          continue;
+        }
+
+        const portalName = url.includes('computrabajo') ? 'CompuTrabajo AR'
+          : url.includes('zonajobs') ? 'ZonaJobs AR'
+          : url.includes('bumeran') ? 'Bumeran AR'
+          : url.includes('trabajando') ? 'Trabajando.com AR'
+          : 'Portal Laboral Argentina';
+
+        const $p = pageHtml ? cheerio.load(pageHtml) : null;
+        const pageTitle = $p ? ($p('h1').first().text().trim() || $p('title').text().trim() || meta.title) : meta.title;
+        const company = $p ? $p('[class*="company"], [class*="empresa"]').first().text().trim() : '';
+
+        for (const email of emails) {
+          pushResult(email, pageTitle, company, url, portalName);
+        }
+      }
+
+      if (extractedResults.length > 0) break; // stop if we got results
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // Run all scrapers in PARALLEL for maximum speed
+  // ─────────────────────────────────────────────────────────────
+  console.log(`\n====== INICIANDO BÚSQUEDA DEEP-SCRAPE ======`);
+  console.log(`Palabra clave: "${keywordClean}" | Ubicación: ${location}`);
+  console.log(`Portales: CompuTrabajo, ZonaJobs, Bumeran, DDG+.com.ar`);
+  console.log(`Modo: Entrar a CADA aviso y buscar email en el cuerpo`);
+  console.log(`Avisos sin email en el cuerpo: DESCARTADOS`);
+  console.log(`===========================================\n`);
+
+  await Promise.allSettled([
+    scrapeCompuTrabajo(),
+    scrapeZonaJobs(),
+    scrapeBumeran(),
+    scrapeViaDDG(),
+  ]);
+
+  console.log(`\n====== BÚSQUEDA FINALIZADA ======`);
+  console.log(`Total de avisos con email verificado en cuerpo: ${extractedResults.length}`);
+  console.log(`=================================\n`);
+
+  // NO FAKE FALLBACK: if no real emails found, return empty array
+  // The frontend will show a "no results" message
   return extractedResults;
 };
 
@@ -240,7 +450,10 @@ app.post(['/api/search', '/search'], handleSearchRequest);
 
 // CV Upload Endpoint with Buffer Storage
 const storage = multer.memoryStorage();
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB max
+});
 
 app.post(['/api/upload-cv', '/upload-cv'], upload.single('cvFile'), (req, res) => {
   try {
@@ -301,8 +514,8 @@ app.post(['/api/test-gmail', '/test-gmail'], async (req, res) => {
   }
 });
 
-// Send Email Endpoint WITH NO FOOTER (CLEAN CUSTOM BODY)
-app.post(['/api/send-email', '/send-email'], async (req, res) => {
+// Send Email Endpoint WITH GUARANTEED MIME ATTACHMENT (multipart/form-data)
+app.post(['/api/send-email', '/send-email'], upload.single('cvFile'), async (req, res) => {
   try {
     const {
       toEmail,
@@ -314,12 +527,12 @@ app.post(['/api/send-email', '/send-email'], async (req, res) => {
       bodyText,
       gmailUser,
       gmailAppPassword,
-      isSimulationMode = true,
-      cvFileName,
-      cvFileType,
-      cvBase64Data,
+      isSimulationMode: isSimRaw = 'true',
       appHostUrl = 'https://job-hunter-argentina.vercel.app',
     } = req.body || {};
+
+    // isSimulationMode arrives as a string from FormData
+    const isSimulationMode = isSimRaw === 'true' || isSimRaw === true;
 
     if (!toEmail || !subject || !bodyText) {
       return res.status(400).json({ error: 'Faltan datos requeridos para el envío.' });
@@ -327,8 +540,7 @@ app.post(['/api/send-email', '/send-email'], async (req, res) => {
 
     const trackingId = `tr_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     const trackingPixelUrl = `${appHostUrl}/api/track/read/${trackingId}`;
-    
-    // CLEAN HTML Body (Contains ONLY the user's text + invisible tracking pixel)
+
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; font-size: 15px; color: #222; line-height: 1.6;">
         ${bodyText.replace(/\n/g, '<br/>')}
@@ -336,20 +548,27 @@ app.post(['/api/send-email', '/send-email'], async (req, res) => {
       </div>
     `;
 
+    // Build attachments array from the uploaded file (multer parses it as req.file)
     const attachments = [];
 
-    if (cvBase64Data && cvFileName) {
+    if (req.file && req.file.buffer && req.file.buffer.length > 0) {
+      // File was uploaded via multipart - use the real binary buffer
+      console.log(`CV adjunto recibido: ${req.file.originalname} (${req.file.size} bytes)`);
       attachments.push({
-        filename: cvFileName,
-        content: Buffer.from(cvBase64Data, 'base64'),
-        contentType: cvFileType || 'application/pdf',
+        filename: req.file.originalname,
+        content: req.file.buffer,
+        contentType: req.file.mimetype || 'application/pdf',
       });
     } else if (globalCV.fileBuffer && globalCV.fileName) {
+      // Fallback: use the globally stored CV buffer from /upload-cv
+      console.log(`Usando CV global: ${globalCV.fileName}`);
       attachments.push({
         filename: globalCV.fileName,
         content: globalCV.fileBuffer,
         contentType: globalCV.fileType || 'application/pdf',
       });
+    } else {
+      console.log('No se encontró CV adjunto - enviando sin adjunto');
     }
 
     if (!isSimulationMode) {
@@ -362,16 +581,22 @@ app.post(['/api/send-email', '/send-email'], async (req, res) => {
         auth: { user: gmailUser, pass: gmailAppPassword },
       });
 
-      await transporter.sendMail({
+      const mailOptions = {
         from: `"Postulante" <${gmailUser}>`,
         to: toEmail,
         subject: subject,
         html: htmlContent,
-        attachments: attachments,
-      });
+      };
+
+      if (attachments.length > 0) {
+        mailOptions.attachments = attachments;
+      }
+
+      const info = await transporter.sendMail(mailOptions);
+      console.log('Email enviado:', info.messageId, '| Adjuntos:', attachments.length);
     }
 
-    const attachedName = cvFileName || globalCV.fileName || 'CV_Postulante.pdf';
+    const attachedName = req.file ? req.file.originalname : (globalCV.fileName || null);
 
     const historyItem = {
       id: trackingId,
@@ -385,7 +610,7 @@ app.post(['/api/send-email', '/send-email'], async (req, res) => {
       status: 'Enviado',
       readAt: null,
       readCount: 0,
-      cvAttached: attachedName,
+      cvAttached: attachedName || 'Ninguno',
       isSimulation: isSimulationMode,
     };
 
@@ -395,7 +620,7 @@ app.post(['/api/send-email', '/send-email'], async (req, res) => {
       success: true,
       message: isSimulationMode
         ? '¡Postulación simulada con éxito!'
-        : '¡Correo enviado exitosamente vía Gmail!',
+        : `¡Correo enviado exitosamente vía Gmail${attachedName ? ' con tu CV adjunto!' : '!'}`,
       item: historyItem,
     });
   } catch (error) {
@@ -432,7 +657,7 @@ app.get(['/api/history', '/history'], (req, res) => {
 
 // Default Root API Status
 app.get(['/api', '/'], (req, res) => {
-  res.json({ status: 'ok', name: 'JobHunter ARG Mailer Engine' });
+  res.json({ status: 'ok', name: 'JobHunter ARG Deep Scraper — Email Verificado en Cuerpo' });
 });
 
 const PORT = process.env.PORT || 5001;

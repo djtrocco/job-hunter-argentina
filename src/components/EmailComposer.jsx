@@ -41,12 +41,8 @@ export default function EmailComposer({
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64Content = event.target.result.split(',')[1];
-        onUploadCV(file, base64Content);
-      };
-      reader.readAsDataURL(file);
+      // Pass the raw File object directly - App.jsx stores it in a ref for multipart upload
+      onUploadCV(file);
     }
   };
 
@@ -63,9 +59,6 @@ export default function EmailComposer({
         .replace(/{PUESTO}/g, testPuesto)
         .replace(/{EMPRESA}/g, testCompany)
         .replace(/{FUENTE}/g, sourceName),
-      cvFileName: cv ? cv.fileName : 'CV_Postulante.pdf',
-      cvFileType: cv ? cv.fileType || 'application/pdf' : 'application/pdf',
-      cvBase64Data: cv ? cv.base64Data : null,
       gmailUser,
       gmailAppPassword,
     });
@@ -119,28 +112,37 @@ export default function EmailComposer({
 
           <div className="border-2 border-dashed border-slate-700 hover:border-cyan-500/50 rounded-xl p-6 text-center transition-all bg-slate-900/40">
             {cv ? (
-              <div className="flex items-center justify-between bg-slate-800/80 p-4 rounded-lg border border-emerald-500/30">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-lg bg-emerald-950 text-emerald-400 border border-emerald-800">
-                    <FileText className="w-6 h-6" />
-                  </div>
-                  <div className="text-left">
-                    <div className="font-semibold text-white text-sm">{cv.fileName}</div>
-                    <div className="text-xs text-emerald-400 font-medium">
-                      ✓ Archivo cargado e integrado al envío de correo • {cv.size || 'Listo'}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between bg-slate-800/80 p-4 rounded-lg border border-emerald-500/30">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-lg bg-emerald-950 text-emerald-400 border border-emerald-800">
+                      <FileText className="w-6 h-6" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-semibold text-white text-sm">{cv.fileName}</div>
+                      <div className="text-xs text-emerald-400 font-medium">
+                        ✓ Listo para adjuntar • {cv.size || 'Cargado'}
+                      </div>
                     </div>
                   </div>
+                  <label className="text-xs text-cyan-400 hover:underline cursor-pointer font-semibold">
+                    Cambiar Archivo
+                    <input type="file" onChange={handleFileChange} accept=".pdf,.docx,.doc" className="hidden" />
+                  </label>
                 </div>
-                <label className="text-xs text-cyan-400 hover:underline cursor-pointer font-semibold">
-                  Cambiar Archivo
-                  <input type="file" onChange={handleFileChange} accept=".pdf,.docx,.doc" className="hidden" />
-                </label>
+                {/* Warning: file may need to be re-uploaded after page refresh */}
+                <div className="flex items-start gap-2 bg-amber-950/40 border border-amber-700/40 rounded-lg p-3 text-left">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-300">
+                    <span className="font-bold">Importante:</span> Si recargaste la página, el archivo no está en memoria. Debes seleccionarlo nuevamente antes de enviar para que llegue como adjunto.
+                  </p>
+                </div>
               </div>
             ) : (
               <div>
                 <FileText className="w-10 h-10 text-slate-500 mx-auto mb-2" />
                 <p className="text-sm font-semibold text-white">Haz clic o arrastra tu CV aquí</p>
-                <p className="text-xs text-slate-400 mt-1">Formatos recomendados: PDF, DOCX (Máx. 10MB)</p>
+                <p className="text-xs text-slate-400 mt-1">Formatos recomendados: PDF, DOCX (Máx. 15MB)</p>
                 <label className="mt-4 btn-secondary text-xs inline-block cursor-pointer">
                   Seleccionar Archivo CV
                   <input type="file" onChange={handleFileChange} accept=".pdf,.docx,.doc" className="hidden" />

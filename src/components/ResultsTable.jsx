@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Mail, ExternalLink, Send, CheckSquare, Square, Building, MapPin, Eye, ShieldCheck, Sparkles } from 'lucide-react';
 
-export default function ResultsTable({ results = [], onSendSingle, onSendBatch, isSending }) {
+export default function ResultsTable({ results = [], onSendSingle, onSendBatch, isSending, searched = false }) {
   const [selectedIds, setSelectedIds] = useState([]);
   const [previewSnippet, setPreviewSnippet] = useState(null);
 
@@ -11,13 +11,27 @@ export default function ResultsTable({ results = [], onSendSingle, onSendBatch, 
         <div className="w-16 h-16 rounded-full bg-slate-900 mx-auto flex items-center justify-center mb-4 border border-slate-800 text-slate-500">
           <Mail className="w-8 h-8" />
         </div>
-        <h3 className="text-lg font-bold text-white mb-2">No se han realizado búsquedas aún</h3>
-        <p className="text-sm text-slate-400 max-w-md mx-auto">
-          Ingresa una palabra clave en el buscador superior para escanear avisos laborales en Argentina y extraer sus emails de contacto.
-        </p>
+        {searched ? (
+          <>
+            <h3 className="text-lg font-bold text-white mb-2">No se encontraron avisos con email en el cuerpo</h3>
+            <p className="text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
+              El scraper recorrió los portales de empleo argentinos y no encontró ningún aviso que incluya un correo electrónico visible en el cuerpo del aviso.
+              <br /><br />
+              <span className="text-cyan-400 font-medium">Sugerencias:</span> Probá con otra palabra clave, variá el término (ej: "contador" en vez de "contabilidad") o intentá de nuevo en unos minutos.
+            </p>
+          </>
+        ) : (
+          <>
+            <h3 className="text-lg font-bold text-white mb-2">Realizá tu primera búsqueda</h3>
+            <p className="text-sm text-slate-400 max-w-md mx-auto">
+              Ingresá una palabra clave arriba para que el scraper recorra los portales de empleo argentinos, entre a cada aviso y extraiga el email del cuerpo del aviso.
+            </p>
+          </>
+        )}
       </div>
     );
   }
+
 
   const toggleSelectAll = () => {
     if (selectedIds.length === results.length) {

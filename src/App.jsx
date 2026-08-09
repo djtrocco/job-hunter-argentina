@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Navbar from './components/Navbar';
 import SearchSection from './components/SearchSection';
 import ResultsTable from './components/ResultsTable';
@@ -14,8 +14,36 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [history, setHistory] = useState([]);
-  const [cv, setCv] = useState(null);
+  const [hasSearched, setHasSearched] = useState(false);
   
+  // cv state only stores metadata (name, type, size) - NOT the file content
+  // The actual File object is kept in memory via a ref for reliable multipart sending
+  const cvFileRef = useRef(null); // holds the real File object
+  const [cv, setCv] = useState(() => {
+    try {
+      const saved = localStorage.getItem('userCVMeta');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    if (cv) {
+      try {
+        // Only save metadata, never the file content - avoids localStorage size limit
+        localStorage.setItem('userCVMeta', JSON.stringify({
+          fileName: cv.fileName,
+          fileType: cv.fileType,
+          size: cv.size,
+          uploadedAt: cv.uploadedAt,
+        }));
+      } catch (e) {
+        console.log('CV meta storage error:', e);
+      }
+    }
+  }, [cv]);
+
   // Gmail & App Passwords settings with localStorage persistence
   const [gmailUser, setGmailUser] = useState(() => localStorage.getItem('gmailUser') || '');
   const [gmailAppPassword, setGmailAppPassword] = useState(() => localStorage.getItem('gmailAppPassword') || '');
@@ -27,7 +55,6 @@ export default function App() {
   const [selectedJob, setSelectedJob] = useState(null);
   const [isTestingGmail, setIsTestingGmail] = useState(false);
 
-  // Persist Gmail settings automatically
   useEffect(() => {
     localStorage.setItem('gmailUser', gmailUser);
   }, [gmailUser]);
@@ -55,7 +82,7 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Helper for mock search fallback in pure static mode
+  // Mock search fallback
   const generateMockSearch = (keyword) => {
     const argentinaLocations = ['Buenos Aires (CABA)', 'Córdoba', 'Rosario, Santa Fe', 'Mendoza', 'Remoto (Argentina)'];
     const searchQueries = [
@@ -98,7 +125,6 @@ export default function App() {
     return resultsList;
   };
 
-  // Fetch initial history & CV
   const fetchHistory = async () => {
     try {
       const res = await fetch('/api/history');
@@ -111,28 +137,16 @@ export default function App() {
     }
   };
 
-  const fetchCV = async () => {
-    try {
-      const res = await fetch('/api/cv');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.cv) setCv(data.cv);
-      }
-    } catch (e) {
-      console.log('CV fetch offset');
-    }
-  };
-
   useEffect(() => {
     fetchHistory();
-    fetchCV();
     const interval = setInterval(fetchHistory, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // Handle Search Execution
   const handleSearch = async ({ keyword, location, portals }) => {
     setIsLoading(true);
+    setResults([]); // Clear previous results
+    setHasSearched(true);
     try {
       const res = await fetch('/api/search', {
         method: 'POST',
@@ -144,57 +158,48 @@ export default function App() {
         const data = await res.json();
         if (data.success) {
           setResults(data.results || []);
-          addToast(
-            'success',
-            '¡Búsqueda Completada!',
-            `Se encontraron ${data.totalFound} avisos con correo electrónico verificado.`
-          );
+          if (data.totalFound > 0) {
+            addToast(
+              'success',
+              '¡Búsqueda Completada!',
+              `Se encontraron ${data.totalFound} avisos con email verificado en el cuerpo del aviso.`
+            );
+          } else {
+            addToast(
+              'info',
+              'Sin resultados con email',
+              `No se encontraron avisos con email visible en el cuerpo para "${keyword}". Probá otra palabra clave.`
+            );
+          }
           setIsLoading(false);
           return;
         }
       }
-    } catch (err) {
-      console.log('Backend API fallback triggered');
-    }
 
-    const fallbackResults = generateMockSearch(keyword);
-    setResults(fallbackResults);
-    addToast(
-      'success',
-      '¡Búsqueda Completada!',
-      `Se encontraron ${fallbackResults.length} avisos con correo electrónico en Argentina.`
-    );
-    setIsLoading(false);
+      // Server error
+      addToast('error', 'Error en la búsqueda', 'No se pudo conectar con el servidor. Verificá tu conexión.');
+      setIsLoading(false);
+    } catch (err) {
+      addToast('error', 'Error de conexión', 'No se pudo conectar con el servidor de búsqueda.');
+      setIsLoading(false);
+    }
   };
 
-  // Handle CV File Upload with Base64 Buffer for real attachments
-  const handleUploadCV = async (file, base64Content = null) => {
-    const cvObj = {
+  // Handle CV File Upload - stores File object in ref and metadata in state
+  const handleUploadCV = (file) => {
+    // Keep the actual File object in memory for multipart form sending
+    cvFileRef.current = file;
+
+    const cvMeta = {
       fileName: file.name,
       fileType: file.type || 'application/pdf',
       size: `${(file.size / 1024).toFixed(1)} KB`,
-      base64Data: base64Content,
       uploadedAt: new Date().toISOString(),
     };
-    setCv(cvObj);
-
-    const formData = new FormData();
-    formData.append('cvFile', file);
-
-    try {
-      const res = await fetch('/api/upload-cv', {
-        method: 'POST',
-        body: formData,
-      });
-      if (res.ok) {
-        addToast('success', 'CV Cargado Exitosamente', `Archivo "${file.name}" cargado y listo para adjuntar en los correos.`);
-      }
-    } catch (e) {
-      addToast('success', 'CV Preparado', `Archivo "${file.name}" listo para adjuntar.`);
-    }
+    setCv(cvMeta);
+    addToast('success', 'CV Adjuntado Exitosamente', `Archivo "${file.name}" (${cvMeta.size}) cargado y listo para enviar.`);
   };
 
-  // Handle SMTP Gmail Connection Test
   const handleTestGmailConnection = async (user, pass) => {
     setIsTestingGmail(true);
     setGmailUser(user);
@@ -213,7 +218,7 @@ export default function App() {
         const data = await res.json();
         if (data.success) {
           setIsSimulationMode(false);
-          addToast('success', 'Gmail Conectado', '¡Conexión SMTP con Gmail verificada! Envío real con archivo adjunto activado.');
+          addToast('success', 'Gmail Conectado', '¡Conexión SMTP verificada! Envío real con archivo adjunto activado.');
           setIsTestingGmail(false);
           return { success: true, message: data.message };
         } else {
@@ -228,14 +233,14 @@ export default function App() {
 
     setIsSimulationMode(false);
     setIsTestingGmail(false);
-    addToast('success', 'Credenciales Guardadas', 'Tus datos de Gmail han sido guardados para el envío de correos.');
+    addToast('success', 'Credenciales Guardadas', 'Tus datos de Gmail han sido guardados.');
     return { success: true, message: 'Credenciales guardadas correctamente.' };
   };
 
-  // Handle Email Dispatch (Includes REAL MIME attachment array)
+  // Handle Email Dispatch using multipart/form-data for reliable file attachment
   const handleSendEmail = async (payload) => {
     setIsSending(true);
-    
+
     const userToUse = payload.gmailUser || gmailUser;
     const passToUse = payload.gmailAppPassword || gmailAppPassword;
 
@@ -243,27 +248,39 @@ export default function App() {
       addToast(
         'error',
         'Faltan Credenciales de Gmail',
-        'Por favor, ingresa a la pestaña "Gmail & SMTP" y configura tu correo y Contraseña de Aplicación de 16 caracteres.'
+        'Por favor, configura tu correo de Gmail y Contraseña de Aplicación en la pestaña "Gmail & SMTP".'
       );
       setActiveTab('settings');
       setIsSending(false);
       return;
     }
 
+    const cvFileNameToSend = cv ? cv.fileName : 'CV_Postulante.pdf';
+
     try {
+      // Build multipart/form-data so the file is sent as a real binary attachment
+      const formData = new FormData();
+      formData.append('toEmail', payload.toEmail);
+      formData.append('company', payload.company || '');
+      formData.append('jobTitle', payload.jobTitle || '');
+      formData.append('sourceUrl', payload.sourceUrl || '');
+      formData.append('sourceName', payload.sourceName || '');
+      formData.append('subject', payload.subject || '');
+      formData.append('bodyText', payload.bodyText || '');
+      formData.append('gmailUser', userToUse);
+      formData.append('gmailAppPassword', passToUse);
+      formData.append('isSimulationMode', String(isSimulationMode));
+      formData.append('appHostUrl', window.location.origin);
+
+      // Attach the actual file if available in ref (session-memory)
+      if (cvFileRef.current) {
+        formData.append('cvFile', cvFileRef.current, cvFileRef.current.name);
+      }
+
       const res = await fetch('/api/send-email', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...payload,
-          gmailUser: userToUse,
-          gmailAppPassword: passToUse,
-          isSimulationMode,
-          cvFileName: cv ? cv.fileName : 'CV_Postulante.pdf',
-          cvFileType: cv ? cv.fileType : 'application/pdf',
-          cvBase64Data: cv ? cv.base64Data : null,
-          appHostUrl: window.location.origin,
-        }),
+        // Do NOT set Content-Type header - browser sets it automatically with boundary for multipart
+        body: formData,
       });
 
       if (res.ok) {
@@ -272,44 +289,30 @@ export default function App() {
           addToast(
             'success',
             isSimulationMode ? '⚡ Postulación Simulada' : '✉️ Correo Enviado vía Gmail con CV Adjunto 📎',
-            `Se envió tu postulación a ${payload.toEmail} con tu archivo de CV adjunto.`
+            `Se despachó tu correo a ${payload.toEmail}${cvFileRef.current ? ' con tu CV adjunto.' : '.'}`
           );
           fetchHistory();
           setActiveTab('history');
           setIsSending(false);
           return;
+        } else {
+          addToast('error', 'Error al Enviar', data.error || 'Ocurrió un error desconocido.');
+          setIsSending(false);
+          return;
         }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        addToast('error', 'Error del Servidor', errData.error || `Error HTTP ${res.status}`);
+        setIsSending(false);
+        return;
       }
     } catch (e) {
-      console.log('Send email fallback');
+      console.error('Send email error:', e);
+      addToast('error', 'Error de Conexión', 'No se pudo conectar con el servidor de envío.');
+      setIsSending(false);
     }
-
-    const demoItem = {
-      id: `tr_${Date.now()}`,
-      keyword: payload.jobTitle || 'Búsqueda de Empleo',
-      company: payload.company || 'Empresa Argentina',
-      jobTitle: payload.jobTitle || 'Aviso Laboral',
-      email: payload.toEmail,
-      sourceUrl: payload.sourceUrl || 'https://www.zonajobs.com.ar',
-      sourceName: payload.sourceName || 'ZonaJobs AR',
-      dateSent: new Date().toISOString(),
-      status: 'Enviado',
-      readAt: null,
-      readCount: 0,
-      cvAttached: cv ? cv.fileName : 'CV_Mi_Perfil.pdf',
-      isSimulation: isSimulationMode,
-    };
-    setHistory((prev) => [demoItem, ...prev]);
-    addToast(
-      'success',
-      isSimulationMode ? '⚡ Postulación Simulada' : '✉️ Correo Enviado vía Gmail con CV Adjunto 📎',
-      `Postulación despachada a ${payload.toEmail} con tu CV adjunto.`
-    );
-    setActiveTab('history');
-    setIsSending(false);
   };
 
-  // Handle Batch Dispatch
   const handleSendBatch = async (items) => {
     setIsSending(true);
     let successCount = 0;
@@ -342,11 +345,15 @@ export default function App() {
             className={`pointer-events-auto p-4 rounded-xl shadow-2xl border backdrop-blur-xl animate-slide-in flex items-start gap-3 ${
               toast.type === 'success'
                 ? 'bg-slate-900/95 border-emerald-500/50 text-emerald-300'
+                : toast.type === 'info'
+                ? 'bg-slate-900/95 border-cyan-500/50 text-cyan-300'
                 : 'bg-slate-900/95 border-red-500/50 text-red-300'
             }`}
           >
             {toast.type === 'success' ? (
               <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            ) : toast.type === 'info' ? (
+              <Info className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
             ) : (
               <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
             )}
@@ -360,6 +367,7 @@ export default function App() {
           </div>
         ))}
       </div>
+
 
       {/* Navigation Header */}
       <Navbar
@@ -378,6 +386,7 @@ export default function App() {
             <SearchSection onSearch={handleSearch} isLoading={isLoading} />
             <ResultsTable
               results={results}
+              searched={hasSearched}
               onSendSingle={(item) => {
                 setSelectedJob(item);
                 setActiveTab('compose');
