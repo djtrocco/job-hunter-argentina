@@ -2,8 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
-import axios from 'axios';
-import * as cheerio from 'cheerio';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -12,25 +10,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(cors());
+
+// Enable CORS for all domains
+app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// In-memory / File-backed Storage for history and uploaded CV
-const uploadsDir = path.join(__dirname, '../uploads');
+// In-memory / File-backed Storage
+const uploadsDir = path.join('/tmp', 'uploads');
 if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+  try {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  } catch (e) {
+    console.log('Using memory storage');
+  }
 }
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}_${file.originalname}`);
-  },
-});
-
+const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 // Store in-memory database for history & settings
@@ -42,9 +38,9 @@ let globalHistory = [
     jobTitle: 'Desarrollador Front-End Senior',
     email: 'rrhh@techsolutions.com.ar',
     sourceUrl: 'https://www.zonajobs.com.ar/empleos/desarrollador-react-101.html',
-    sourceName: 'ZonaJobs',
+    sourceName: 'ZonaJobs AR',
     dateSent: new Date(Date.now() - 3600000 * 2).toISOString(),
-    status: 'Leído', // 'Enviado', 'Leído', 'Fallido'
+    status: 'Leído',
     readAt: new Date(Date.now() - 3600000 * 1).toISOString(),
     readCount: 2,
     cvAttached: 'CV_Gonzalo_2026.pdf',
@@ -56,7 +52,7 @@ let globalHistory = [
     jobTitle: 'Analista Impositivo y Contable',
     email: 'busquedas@estudiopalermo.ar',
     sourceUrl: 'https://ar.computrabajo.com/ofertas-de-trabajo/oferta-contador-102',
-    sourceName: 'CompuTrabajo',
+    sourceName: 'CompuTrabajo AR',
     dateSent: new Date(Date.now() - 3600000 * 5).toISOString(),
     status: 'Enviado',
     readAt: null,
@@ -71,43 +67,29 @@ let globalCV = {
   uploadedAt: new Date().toISOString(),
 };
 
-// Regex patterns to match emails cleanly
-const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-
-// Helper to filter out fake or image emails
-const isRealEmail = (email) => {
-  const clean = email.toLowerCase().trim();
-  const invalidExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.pdf', '.css', '.js'];
-  if (invalidExtensions.some((ext) => clean.endsWith(ext))) return false;
-  if (clean.includes('example.com') || clean.includes('w3.org') || clean.includes('sentry.io') || clean.includes('schema.org')) return false;
-  return true;
-};
-
-// Search Engine & Scraping API
-app.post('/api/search', async (req, res) => {
+// Search Engine & Scraping API Handler (Supports both /api/search and /search)
+const handleSearchRequest = async (req, res) => {
   try {
-    const { keyword, location = 'Argentina', portals = ['zonajobs', 'computrabajo', 'linkedin', 'google'] } = req.body;
+    const { keyword = 'Desarrollador', location = 'Argentina', portals = [] } = req.body || {};
     
-    if (!keyword) {
+    if (!keyword || !keyword.trim()) {
       return res.status(400).json({ error: 'Debes ingresar una palabra clave de búsqueda.' });
     }
 
     const results = [];
     const foundEmails = new Set();
 
-    // Simulated & Real scrapers tailored for Argentina Job Market
     const searchQueries = [
-      { name: 'ZonaJobs Argentina', domain: 'zonajobs.com.ar', base: 'https://www.zonajobs.com.ar' },
-      { name: 'CompuTrabajo Argentina', domain: 'ar.computrabajo.com', base: 'https://ar.computrabajo.com' },
+      { name: 'ZonaJobs (.com.ar)', domain: 'zonajobs.com.ar', base: 'https://www.zonajobs.com.ar' },
+      { name: 'CompuTrabajo (AR)', domain: 'ar.computrabajo.com', base: 'https://ar.computrabajo.com' },
       { name: 'LinkedIn Argentina', domain: 'ar.linkedin.com', base: 'https://ar.linkedin.com' },
-      { name: 'Búsqueda Web Google .AR', domain: 'google.com.ar', base: 'https://www.google.com.ar' }
+      { name: 'Google Búsqueda Web', domain: 'google.com.ar', base: 'https://www.google.com.ar' }
     ];
 
-    // Rich mockup / real hybrid scraping generator for reliable, instant demo results + real regex extraction
     const argentinaLocations = ['Buenos Aires (CABA)', 'Córdoba', 'Rosario, Santa Fe', 'Mendoza', 'Remoto (Argentina)'];
     const companies = [
-      'Empresa de Tecnología & Software',
-      'Consultora de Recursos Humanos AR',
+      'Empresa de Tecnología & Software AR',
+      'Consultora de Recursos Humanos',
       'Grupo Financiero Argentina',
       'Estudio Profesional & Asesores',
       'Agencia Digital Buenos Aires',
@@ -120,7 +102,6 @@ app.post('/api/search', async (req, res) => {
       return `@${slug || 'rrhh'}.com.ar`;
     };
 
-    // Generate smart search hits based on keyword
     for (let i = 0; i < 6; i++) {
       const source = searchQueries[i % searchQueries.length];
       const comp = companies[i % companies.length];
@@ -143,7 +124,7 @@ app.post('/api/search', async (req, res) => {
           location: loc,
           email: extractedEmail,
           confidence: 'Alta (98%)',
-          snippet: `Buscamos ${keyword} para sumarse a nuestro equipo en ${loc}. Requisitos: experiencia previa, proactividad y trabajo en equipo. Enviar CV indicando remuneración pretendida a ${extractedEmail}.`,
+          snippet: `Buscamos ${keyword} para sumarse a nuestro equipo en ${loc}. Requisitos: experiencia previa, proactividad y trabajo en equipo. Enviar CV a ${extractedEmail}.`,
           sourceName: source.name,
           sourceUrl: itemUrl,
           foundAt: new Date().toLocaleDateString('es-AR', { hour: '2-digit', minute: '2-digit' }),
@@ -159,36 +140,40 @@ app.post('/api/search', async (req, res) => {
     });
   } catch (error) {
     console.error('Error en búsqueda:', error);
-    res.status(500).json({ error: 'Ocurrió un error al procesar las búsquedas.' });
+    return res.status(500).json({ error: 'Ocurrió un error al procesar las búsquedas.' });
   }
-});
+};
+
+app.post('/api/search', handleSearchRequest);
+app.post('/search', handleSearchRequest);
 
 // CV Upload Endpoint
-app.post('/api/upload-cv', upload.single('cvFile'), (req, res) => {
+const handleCVUpload = (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No se ha seleccionado ningún archivo.' });
+    if (req.file) {
+      globalCV = {
+        fileName: req.file.originalname,
+        size: `${(req.file.size / 1024).toFixed(1)} KB`,
+        uploadedAt: new Date().toISOString(),
+      };
     }
-    globalCV = {
-      fileName: req.file.originalname,
-      fileUrl: `/uploads/${req.file.filename}`,
-      size: `${(req.file.size / 1024).toFixed(1)} KB`,
-      uploadedAt: new Date().toISOString(),
-    };
     return res.json({ success: true, cv: globalCV });
   } catch (error) {
     res.status(500).json({ error: 'Error al cargar el archivo del CV.' });
   }
-});
+};
+
+app.post('/api/upload-cv', upload.single('cvFile'), handleCVUpload);
+app.post('/upload-cv', upload.single('cvFile'), handleCVUpload);
 
 // Get Current CV
-app.get('/api/cv', (req, res) => {
+app.get(['/api/cv', '/cv'], (req, res) => {
   res.json({ success: true, cv: globalCV });
 });
 
 // Test Gmail SMTP Credentials Endpoint
-app.post('/api/test-gmail', async (req, res) => {
-  const { gmailUser, gmailAppPassword } = req.body;
+const handleTestGmail = async (req, res) => {
+  const { gmailUser, gmailAppPassword } = req.body || {};
   if (!gmailUser || !gmailAppPassword) {
     return res.status(400).json({ error: 'Debes proveer el correo de Gmail y la Contraseña de Aplicación.' });
   }
@@ -196,10 +181,7 @@ app.post('/api/test-gmail', async (req, res) => {
   try {
     const transporter = nodemailer.createTransport({
       service: 'gmail',
-      auth: {
-        user: gmailUser,
-        pass: gmailAppPassword,
-      },
+      auth: { user: gmailUser, pass: gmailAppPassword },
     });
 
     await transporter.verify();
@@ -210,10 +192,12 @@ app.post('/api/test-gmail', async (req, res) => {
       details: error.message,
     });
   }
-});
+};
 
-// Send Email Endpoint with Tracking Pixel & Attachment
-app.post('/api/send-email', async (req, res) => {
+app.post(['/api/test-gmail', '/test-gmail'], handleTestGmail);
+
+// Send Email Endpoint with Tracking Pixel
+const handleSendEmail = async (req, res) => {
   try {
     const {
       toEmail,
@@ -226,16 +210,14 @@ app.post('/api/send-email', async (req, res) => {
       gmailUser,
       gmailAppPassword,
       isSimulationMode = true,
-      appHostUrl = 'http://localhost:3000',
-    } = req.body;
+      appHostUrl = 'https://job-hunter-argentina.vercel.app',
+    } = req.body || {};
 
     if (!toEmail || !subject || !bodyText) {
       return res.status(400).json({ error: 'Faltan datos requeridos para el envío.' });
     }
 
     const trackingId = `tr_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    
-    // Construct HTML body with invisible 1x1 Tracking Pixel
     const trackingPixelUrl = `${appHostUrl}/api/track/read/${trackingId}`;
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; font-size: 15px; color: #222; line-height: 1.6;">
@@ -254,23 +236,17 @@ app.post('/api/send-email', async (req, res) => {
 
       const transporter = nodemailer.createTransport({
         service: 'gmail',
-        auth: {
-          user: gmailUser,
-          pass: gmailAppPassword,
-        },
+        auth: { user: gmailUser, pass: gmailAppPassword },
       });
 
-      const mailOptions = {
+      await transporter.sendMail({
         from: `"Postulante" <${gmailUser}>`,
         to: toEmail,
         subject: subject,
         html: htmlContent,
-      };
-
-      await transporter.sendMail(mailOptions);
+      });
     }
 
-    // Save to History
     const historyItem = {
       id: trackingId,
       keyword: jobTitle || 'Búsqueda de Empleo',
@@ -300,22 +276,20 @@ app.post('/api/send-email', async (req, res) => {
     console.error('Error al enviar correo:', error);
     return res.status(500).json({ error: `Falló el envío: ${error.message}` });
   }
-});
+};
+
+app.post(['/api/send-email', '/send-email'], handleSendEmail);
 
 // Read Receipt Tracking Pixel Endpoint
-app.get('/api/track/read/:id', (req, res) => {
+const handleTrackingRead = (req, res) => {
   const { id } = req.params;
-  
-  // Find in history and update status to 'Leído'
   const item = globalHistory.find((h) => h.id === id);
   if (item) {
     item.status = 'Leído';
     item.readAt = new Date().toISOString();
     item.readCount = (item.readCount || 0) + 1;
-    console.log(`[PÍXEL LECTURA] ¡Email ${id} leído por el destinatario! (${item.email})`);
   }
 
-  // Serve 1x1 transparent GIF image
   const transparentGif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
   res.writeHead(200, {
     'Content-Type': 'image/gif',
@@ -325,25 +299,25 @@ app.get('/api/track/read/:id', (req, res) => {
     'Expires': '0',
   });
   res.end(transparentGif);
-});
+};
+
+app.get(['/api/track/read/:id', '/track/read/:id'], handleTrackingRead);
 
 // Get Application History
-app.get('/api/history', (req, res) => {
+app.get(['/api/history', '/history'], (req, res) => {
   res.json({ success: true, history: globalHistory });
 });
 
-// Serve frontend static assets in production if built
-const distDir = path.join(__dirname, '../dist');
-if (fs.existsSync(distDir)) {
-  app.use(express.static(distDir));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(distDir, 'index.html'));
-  });
-}
+// Default Root API Status
+app.get(['/api', '/'], (req, res) => {
+  res.json({ status: 'ok', name: 'JobHunter ARG API Serverless' });
+});
 
 const PORT = process.env.PORT || 5001;
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor Job Hunter Argentina activo en http://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`🚀 Servidor activo en http://localhost:${PORT}`);
+  });
+}
 
 export default app;
