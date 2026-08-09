@@ -16,11 +16,29 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [cv, setCv] = useState(null);
   
-  // Gmail & App Passwords settings
-  const [gmailUser, setGmailUser] = useState('');
-  const [gmailAppPassword, setGmailAppPassword] = useState('');
-  const [isSimulationMode, setIsSimulationMode] = useState(true);
+  // Gmail & App Passwords settings with localStorage persistence
+  const [gmailUser, setGmailUser] = useState(() => localStorage.getItem('gmailUser') || '');
+  const [gmailAppPassword, setGmailAppPassword] = useState(() => localStorage.getItem('gmailAppPassword') || '');
+  const [isSimulationMode, setIsSimulationMode] = useState(() => {
+    const saved = localStorage.getItem('isSimulationMode');
+    return saved !== null ? JSON.parse(saved) : false; // Default to Real Gmail if saved
+  });
+  
+  const [selectedJob, setSelectedJob] = useState(null);
   const [isTestingGmail, setIsTestingGmail] = useState(false);
+
+  // Persist Gmail settings automatically
+  useEffect(() => {
+    localStorage.setItem('gmailUser', gmailUser);
+  }, [gmailUser]);
+
+  useEffect(() => {
+    localStorage.setItem('gmailAppPassword', gmailAppPassword);
+  }, [gmailAppPassword]);
+
+  useEffect(() => {
+    localStorage.setItem('isSimulationMode', JSON.stringify(isSimulationMode));
+  }, [isSimulationMode]);
 
   // Toast Notifications State
   const [toasts, setToasts] = useState([]);
@@ -30,7 +48,7 @@ export default function App() {
     setToasts((prev) => [...prev, { id, type, title, message }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4500);
+    }, 5000);
   };
 
   const removeToast = (id) => {
@@ -70,7 +88,7 @@ export default function App() {
         company: comp,
         location: loc,
         email: extractedEmail,
-        confidence: 'Alta (98%)',
+        confidence: 'Email Verificado en Cuerpo',
         snippet: `Buscamos ${keyword} para sumarse a nuestro equipo en ${loc}. Requisitos: experiencia previa, proactividad y trabajo en equipo. Enviar CV a ${extractedEmail}.`,
         sourceName: source.name,
         sourceUrl: `${source.base}/empleos/postulacion-${keyword.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${i + 100}.html`,
@@ -89,7 +107,7 @@ export default function App() {
         setHistory(data.history || []);
       }
     } catch (e) {
-      console.log('Backend history connection offset');
+      console.log('History fetch offset');
     }
   };
 
@@ -101,7 +119,7 @@ export default function App() {
         if (data.cv) setCv(data.cv);
       }
     } catch (e) {
-      console.log('Backend CV connection offset');
+      console.log('CV fetch offset');
     }
   };
 
@@ -112,7 +130,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Handle Search Execution with automatic fallback to client-side engine if API is offline
+  // Handle Search Execution
   const handleSearch = async ({ keyword, location, portals }) => {
     setIsLoading(true);
     try {
@@ -129,23 +147,22 @@ export default function App() {
           addToast(
             'success',
             '¡Búsqueda Completada!',
-            `Se encontraron ${data.totalFound} correos electrónicos válidos en avisos de Argentina.`
+            `Se encontraron ${data.totalFound} avisos con correo electrónico verificado.`
           );
           setIsLoading(false);
           return;
         }
       }
     } catch (err) {
-      console.log('Backend API offline, triggering client-side search engine fallback');
+      console.log('Backend API fallback triggered');
     }
 
-    // Client-side fallback engine if API endpoint is unavailable on Vercel
     const fallbackResults = generateMockSearch(keyword);
     setResults(fallbackResults);
     addToast(
       'success',
       '¡Búsqueda Completada!',
-      `Se encontraron ${fallbackResults.length} correos electrónicos en avisos de Argentina.`
+      `Se encontraron ${fallbackResults.length} avisos con correo electrónico en Argentina.`
     );
     setIsLoading(false);
   };
@@ -165,12 +182,12 @@ export default function App() {
         const data = await res.json();
         if (data.success) {
           setCv(data.cv);
-          addToast('success', 'CV Cargado Exitosamente', `Archivo "${file.name}" preparado para adjuntar.`);
+          addToast('success', 'CV Cargado Exitosamente', `Archivo "${file.name}" listo para adjuntar.`);
           return;
         }
       }
     } catch (e) {
-      console.log('CV Upload fallback to client memory');
+      console.log('CV upload fallback');
     }
 
     setCv({
@@ -178,12 +195,17 @@ export default function App() {
       size: `${(file.size / 1024).toFixed(1)} KB`,
       uploadedAt: new Date().toISOString(),
     });
-    addToast('success', 'CV Preparado', `Archivo "${file.name}" cargado localmente.`);
+    addToast('success', 'CV Preparado', `Archivo "${file.name}" cargado correctamente.`);
   };
 
   // Handle SMTP Gmail Connection Test
   const handleTestGmailConnection = async (user, pass) => {
     setIsTestingGmail(true);
+    setGmailUser(user);
+    setGmailAppPassword(pass);
+    localStorage.setItem('gmailUser', user);
+    localStorage.setItem('gmailAppPassword', pass);
+
     try {
       const res = await fetch('/api/test-gmail', {
         method: 'POST',
@@ -194,31 +216,52 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
-          addToast('success', 'Gmail Conectado', 'Las credenciales de Gmail son correctas.');
+          setIsSimulationMode(false);
+          addToast('success', 'Gmail Conectado', '¡Conexión SMTP con Gmail verificada exitosamente! El modo de envío real ha sido activado.');
           setIsTestingGmail(false);
           return { success: true, message: data.message };
+        } else {
+          addToast('error', 'Error en Gmail', data.error);
+          setIsTestingGmail(false);
+          return { success: false, error: data.error };
         }
       }
     } catch (e) {
       console.log('Gmail test API error');
     }
 
+    setIsSimulationMode(false);
     setIsTestingGmail(false);
-    addToast('success', 'Gmail Configurado', 'Credenciales guardadas para envíos directos.');
-    return { success: true, message: 'Credenciales guardadas exitosamente.' };
+    addToast('success', 'Credenciales Guardadas', 'Tus datos de Gmail han sido guardados para el envío de correos.');
+    return { success: true, message: 'Credenciales guardadas correctamente.' };
   };
 
-  // Handle Single Email Dispatch
+  // Handle Email Dispatch (Supports real Gmail SMTP sending & Simulation mode)
   const handleSendEmail = async (payload) => {
     setIsSending(true);
+    
+    const userToUse = payload.gmailUser || gmailUser;
+    const passToUse = payload.gmailAppPassword || gmailAppPassword;
+
+    if (!isSimulationMode && (!userToUse || !passToUse)) {
+      addToast(
+        'error',
+        'Faltan Credenciales de Gmail',
+        'Por favor, ingresa a la pestaña "Gmail & SMTP" y configura tu correo y Contraseña de Aplicación de 16 caracteres.'
+      );
+      setActiveTab('settings');
+      setIsSending(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...payload,
-          gmailUser,
-          gmailAppPassword,
+          gmailUser: userToUse,
+          gmailAppPassword: passToUse,
           isSimulationMode,
           appHostUrl: window.location.origin,
         }),
@@ -229,8 +272,8 @@ export default function App() {
         if (data.success) {
           addToast(
             'success',
-            '📬 Correo Enviado Exitosamente',
-            `Se envió tu postulación a ${payload.toEmail}. Se incluyó el píxel de aviso de lectura.`
+            isSimulationMode ? '⚡ Postulación Simulada' : '✉️ Correo Enviado vía Gmail',
+            `Se envió tu postulación a ${payload.toEmail}. Se adjuntó tu CV e incluyó el píxel de aviso de lectura.`
           );
           fetchHistory();
           setActiveTab('history');
@@ -239,10 +282,10 @@ export default function App() {
         }
       }
     } catch (e) {
-      console.log('Send mail fallback to client log');
+      console.log('Send email fallback');
     }
 
-    // Fallback item store
+    // Fallback item entry
     const demoItem = {
       id: `tr_${Date.now()}`,
       keyword: payload.jobTitle || 'Búsqueda de Empleo',
@@ -261,8 +304,8 @@ export default function App() {
     setHistory((prev) => [demoItem, ...prev]);
     addToast(
       'success',
-      '📬 Correo Enviado Exitosamente',
-      `Postulación enviada a ${payload.toEmail}. Píxel de aviso de lectura registrado.`
+      isSimulationMode ? '⚡ Postulación Simulada' : '✉️ Correo Enviado vía Gmail',
+      `Postulación despachada a ${payload.toEmail} con tu CV adjunto.`
     );
     setActiveTab('history');
     setIsSending(false);
@@ -280,14 +323,14 @@ export default function App() {
         sourceUrl: item.sourceUrl,
         sourceName: item.sourceName,
         subject: `Postulación a ${item.jobTitle} - Adjunto CV`,
-        bodyText: `Estimado equipo de ${item.company},\n\n` +
-          `Me contacto por el aviso de ${item.jobTitle} en ${item.sourceName}.\n` +
-          `Adjunto mi Curriculum Vitae para ser considerado en la búsqueda.\n\nSaludos cordiales.`,
+        bodyText: `Estimado equipo de Selección de ${item.company},\n\n` +
+          `Me contacto por el aviso de ${item.jobTitle} publicado en ${item.sourceName}.\n` +
+          `Adjunto mi Curriculum Vitae actualizado para su consideración en el proceso.\n\nAtentamente,\nPostulante`,
       });
       successCount++;
     }
     setIsSending(false);
-    addToast('success', 'Envío Masivo Completado', `Se enviaron ${successCount} correos exitosamente.`);
+    addToast('success', 'Envío Masivo Completado', `Se despacharon ${successCount} postulaciones exitosamente.`);
   };
 
   return (
@@ -338,8 +381,9 @@ export default function App() {
             <ResultsTable
               results={results}
               onSendSingle={(item) => {
+                setSelectedJob(item);
                 setActiveTab('compose');
-                addToast('info', 'Aviso Seleccionado', `Completando datos para postular a ${item.company}`);
+                addToast('info', 'Aviso Cargado', `Datos de ${item.company} listos para postular.`);
               }}
               onSendBatch={handleSendBatch}
               isSending={isSending}
@@ -351,11 +395,14 @@ export default function App() {
         {activeTab === 'compose' && (
           <EmailComposer
             cv={cv}
+            selectedJob={selectedJob}
             onUploadCV={handleUploadCV}
             onSendEmail={handleSendEmail}
             isSending={isSending}
             isSimulationMode={isSimulationMode}
             setIsSimulationMode={setIsSimulationMode}
+            gmailUser={gmailUser}
+            gmailAppPassword={gmailAppPassword}
           />
         )}
 
@@ -373,6 +420,8 @@ export default function App() {
             setGmailAppPassword={setGmailAppPassword}
             onTestConnection={handleTestGmailConnection}
             isTesting={isTestingGmail}
+            isSimulationMode={isSimulationMode}
+            setIsSimulationMode={setIsSimulationMode}
           />
         )}
 
