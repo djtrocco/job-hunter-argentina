@@ -1,29 +1,65 @@
 import React, { useState } from 'react';
-import { Search, MapPin, Sparkles, Filter, CheckCircle2, Globe, Building2 } from 'lucide-react';
+import { Search, MapPin, Sparkles, Filter, CheckCircle2, Globe, Building2, Info } from 'lucide-react';
 
 export default function SearchSection({ onSearch, isLoading }) {
-  const [keyword, setKeyword] = useState('Desarrollador Full Stack');
+  const [keyword, setKeyword] = useState('');
   const [location, setLocation] = useState('Buenos Aires');
   const [selectedPortals, setSelectedPortals] = useState({
-    zonajobs: true,
     computrabajo: true,
-    linkedin: true,
-    google: true,
+    zonajobs: true,
+    bumeran: true,
+    duckduckgo: true,
   });
 
   const presets = [
     'Desarrollador Full Stack',
-    'Desarrollador React / Node',
+    'Desarrollador React',
     'Contador / Impositivo',
     'Vendedor / Comercial',
     'Analista de Marketing',
     'Administrativo / RRHH',
     'Diseñador UX/UI',
-    'Soporte Técnico',
+    'Soporte Técnico IT',
+  ];
+
+  const portals = [
+    {
+      id: 'computrabajo',
+      label: 'CompuTrabajo',
+      description: 'ar.computrabajo.com',
+      badge: 'AR',
+      color: 'text-orange-400',
+    },
+    {
+      id: 'zonajobs',
+      label: 'ZonaJobs',
+      description: 'zonajobs.com.ar',
+      badge: 'AR',
+      color: 'text-blue-400',
+    },
+    {
+      id: 'bumeran',
+      label: 'Bumeran',
+      description: 'bumeran.com.ar',
+      badge: 'AR',
+      color: 'text-purple-400',
+    },
+    {
+      id: 'duckduckgo',
+      label: 'Búsqueda Web',
+      description: 'portales .com.ar con email',
+      badge: 'WEB',
+      color: 'text-emerald-400',
+    },
   ];
 
   const togglePortal = (key) => {
-    setSelectedPortals((prev) => ({ ...prev, [key]: !prev[key] }));
+    setSelectedPortals((prev) => {
+      const activeCount = Object.values(prev).filter(Boolean).length;
+      // Prevent deselecting all portals
+      if (prev[key] && activeCount === 1) return prev;
+      return { ...prev, [key]: !prev[key] };
+    });
   };
 
   const handleSubmit = (e) => {
@@ -36,8 +72,11 @@ export default function SearchSection({ onSearch, isLoading }) {
     });
   };
 
+  const activeCount = Object.values(selectedPortals).filter(Boolean).length;
+
   return (
     <div className="glass-panel p-6 sm:p-8 mb-8">
+      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
@@ -45,18 +84,18 @@ export default function SearchSection({ onSearch, isLoading }) {
             Buscador de Avisos Laborales en Argentina
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Escanea los motores y portales de empleo de Argentina para rastrear vacantes y extraer sus correos de contacto.
+            Entra a cada aviso individualmente y extrae el email del cuerpo. Si el aviso no tiene email, es descartado.
           </p>
         </div>
-        <div className="flex items-center gap-2 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 text-xs text-slate-300">
-          <Globe className="w-4 h-4 text-emerald-400" />
-          Filtro Activo: <span className="font-semibold text-white">Dominio .com.ar & Portales AR</span>
+        <div className="flex items-center gap-2 bg-emerald-950/40 px-3 py-2 rounded-lg border border-emerald-800/50 text-xs text-emerald-300">
+          <Globe className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>Solo resultados con email real en el cuerpo del aviso</span>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-          
+
           {/* Keyword Input */}
           <div className="md:col-span-6">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-2">
@@ -70,6 +109,7 @@ export default function SearchSection({ onSearch, isLoading }) {
                 onChange={(e) => setKeyword(e.target.value)}
                 placeholder="Ej: Desarrollador React, Contador, Vendedor..."
                 className="glass-input pl-11"
+                required
               />
             </div>
           </div>
@@ -90,6 +130,7 @@ export default function SearchSection({ onSearch, isLoading }) {
                 <option value="Córdoba">Córdoba</option>
                 <option value="Rosario">Rosario (Santa Fe)</option>
                 <option value="Mendoza">Mendoza</option>
+                <option value="Tucumán">Tucumán</option>
                 <option value="Remoto">Remoto (Toda Argentina)</option>
               </select>
             </div>
@@ -99,13 +140,13 @@ export default function SearchSection({ onSearch, isLoading }) {
           <div className="md:col-span-3 flex items-end">
             <button
               type="submit"
-              disabled={isLoading}
-              className="btn-primary w-full justify-center py-3 text-base"
+              disabled={isLoading || !keyword.trim()}
+              className="btn-primary w-full justify-center py-3 text-base disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
                 <>
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Escaneando Portales...
+                  Escaneando avisos...
                 </>
               ) : (
                 <>
@@ -120,7 +161,7 @@ export default function SearchSection({ onSearch, isLoading }) {
 
         {/* Quick Presets */}
         <div>
-          <span className="text-xs text-slate-400 font-medium mr-2">Búsquedas Frecuentes:</span>
+          <span className="text-xs text-slate-400 font-medium mr-2">Búsquedas frecuentes:</span>
           <div className="flex flex-wrap gap-2 mt-2">
             {presets.map((preset) => (
               <button
@@ -139,41 +180,54 @@ export default function SearchSection({ onSearch, isLoading }) {
           </div>
         </div>
 
-        {/* Target Portals Selection */}
+        {/* Portal Selection */}
         <div className="pt-4 border-t border-slate-800/80">
-          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
-            Motores & Fuentes Incluidas en el Escaneo:
-          </label>
+          <div className="flex items-center justify-between mb-3">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Portales incluidos en el escaneo ({activeCount} activos)
+            </label>
+            <div className="flex items-center gap-1.5 text-[11px] text-amber-400 bg-amber-950/30 border border-amber-800/30 px-2.5 py-1 rounded-lg">
+              <Info className="w-3.5 h-3.5" />
+              El scraper entra a cada aviso para buscar el email en el cuerpo
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { id: 'zonajobs', label: 'ZonaJobs (.com.ar)', badge: 'AR' },
-              { id: 'computrabajo', label: 'CompuTrabajo (AR)', badge: 'AR' },
-              { id: 'linkedin', label: 'LinkedIn Argentina', badge: 'RED' },
-              { id: 'google', label: 'Google Búsqueda Web', badge: 'WEB' },
-            ].map((portal) => (
+            {portals.map((portal) => (
               <div
                 key={portal.id}
                 onClick={() => togglePortal(portal.id)}
-                className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
+                className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-all select-none ${
                   selectedPortals[portal.id]
                     ? 'bg-slate-900/90 border-cyan-500/40 text-white'
-                    : 'bg-slate-950/40 border-slate-800/60 text-slate-500'
+                    : 'bg-slate-950/40 border-slate-800/60 text-slate-500 hover:border-slate-700'
                 }`}
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between mb-1.5">
                   <CheckCircle2
                     className={`w-4 h-4 ${
                       selectedPortals[portal.id] ? 'text-cyan-400' : 'text-slate-600'
                     }`}
                   />
-                  <span className="text-xs font-medium">{portal.label}</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                    {portal.badge}
+                  </span>
                 </div>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
-                  {portal.badge}
+                <span className={`text-xs font-bold ${selectedPortals[portal.id] ? 'text-white' : 'text-slate-500'}`}>
+                  {portal.label}
+                </span>
+                <span className={`text-[11px] mt-0.5 ${selectedPortals[portal.id] ? portal.color : 'text-slate-600'}`}>
+                  {portal.description}
                 </span>
               </div>
             ))}
           </div>
+
+          {/* Info note */}
+          <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
+            ⏱️ La búsqueda puede tardar <span className="text-slate-400 font-medium">15-30 segundos</span> porque el scraper entra a cada aviso individualmente.
+            Solo se muestran avisos donde se encontró un email real en el cuerpo de la publicación.
+          </p>
         </div>
 
       </form>
