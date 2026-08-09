@@ -63,7 +63,11 @@ const isRealEmail = (email) => {
 // Strategy: search each Argentine job portal → enter every listing URL →
 //           extract email FROM THE BODY of the post → discard if no email found
 // ─────────────────────────────────────────────────────────────────────────────
-const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') => {
+const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires', portals = null) => {
+  // Si no se especifican portales, se corren todos (comportamiento por defecto)
+  const activePortals = Array.isArray(portals) && portals.length > 0
+    ? portals
+    : ['computrabajo', 'zonajobs', 'bumeran', 'indeed', 'duckduckgo'];
   const keywordClean = rawKeyword.trim().replace(/\s+/g, ' ');
   const extractedResults = [];
   const foundEmailsSet = new Set();
@@ -319,7 +323,58 @@ const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') =>
   };
 
   // ╔══════════════════════════════════════════════════════════════╗
-  // ║  PORTAL 4: DuckDuckGo → filtra portales .com.ar con email  ║
+  // ║  PORTAL 4: Indeed Argentina                                 ║
+  // ║  Aviso: Indeed bloquea scraping agresivamente (Cloudflare/  ║
+  // ║  JS). Puede devolver 0 resultados según el momento/IP.      ║
+  // ╚══════════════════════════════════════════════════════════════╝
+  const scrapeIndeed = async () => {
+    const searchUrl = `https://ar.indeed.com/jobs?q=${encodeURIComponent(keywordClean)}&l=${encodeURIComponent(location)}`;
+    console.log(`\n[Indeed] Buscando en: ${searchUrl}`);
+
+    const listHtml = await safeFetch(searchUrl, 10000);
+    if (!listHtml) {
+      console.log(`[Indeed] Sin respuesta (probable bloqueo anti-bot)`);
+      return;
+    }
+
+    const $ = cheerio.load(listHtml);
+    const postLinks = new Map();
+
+    // Indeed usa distintos selectores según el layout servido; probamos varios
+    $('a.jcs-JobTitle, a[data-jk], h2.jobTitle a, a[id^="job_"]').each((_, el) => {
+      let href = $(el).attr('href') || '';
+      if (!href) return;
+      if (href.startsWith('/')) href = 'https://ar.indeed.com' + href;
+      const title = $(el).text().trim() || $(el).attr('title') || '';
+      if (href.includes('indeed.com') && !postLinks.has(href)) {
+        postLinks.set(href, title || keywordClean);
+      }
+    });
+
+    console.log(`[Indeed] ${postLinks.size} avisos individuales encontrados`);
+
+    for (const [url, title] of [...postLinks.entries()].slice(0, 10)) {
+      console.log(`  → Entrando al aviso: ${url}`);
+      const pageHtml = await safeFetch(url, 8000);
+      const emails = extractEmailsFromBody(pageHtml);
+
+      if (emails.length === 0) {
+        console.log(`  ✗ Sin email en cuerpo → DESCARTADO`);
+        continue;
+      }
+
+      const $p = cheerio.load(pageHtml);
+      const pageTitle = $p('h1').first().text().trim() || $p('title').text().trim() || title;
+      const company = $p('[class*="company"], [data-testid="inlineHeader-companyName"], [class*="empresa"]').first().text().trim();
+
+      for (const email of emails) {
+        pushResult(email, pageTitle, company, url, 'Indeed Argentina');
+      }
+    }
+  };
+
+  // ╔══════════════════════════════════════════════════════════════╗
+  // ║  PORTAL 5: DuckDuckGo → filtra portales .com.ar con email  ║
   // ║  Busca avisos reales que mencionen emails en su contenido   ║
   // ╚══════════════════════════════════════════════════════════════╝
   const scrapeViaDDG = async () => {
@@ -403,17 +458,24 @@ const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') =>
   // ─────────────────────────────────────────────────────────────
   console.log(`\n====== INICIANDO BÚSQUEDA DEEP-SCRAPE ======`);
   console.log(`Palabra clave: "${keywordClean}" | Ubicación: ${location}`);
-  console.log(`Portales: CompuTrabajo, ZonaJobs, Bumeran, DDG+.com.ar`);
+  console.log(`Portales activos: ${activePortals.join(', ')}`);
   console.log(`Modo: Entrar a CADA aviso y buscar email en el cuerpo`);
   console.log(`Avisos sin email en el cuerpo: DESCARTADOS`);
   console.log(`===========================================\n`);
 
-  await Promise.allSettled([
-    scrapeCompuTrabajo(),
-    scrapeZonaJobs(),
-    scrapeBumeran(),
-    scrapeViaDDG(),
-  ]);
+  const scraperMap = {
+    computrabajo: scrapeCompuTrabajo,
+    zonajobs: scrapeZonaJobs,
+    bumeran: scrapeBumeran,
+    indeed: scrapeIndeed,
+    duckduckgo: scrapeViaDDG,
+  };
+
+  const tasksToRun = activePortals
+    .filter((key) => typeof scraperMap[key] === 'function')
+    .map((key) => scraperMap[key]());
+
+  await Promise.allSettled(tasksToRun);
 
   console.log(`\n====== BÚSQUEDA FINALIZADA ======`);
   console.log(`Total de avisos con email verificado en cuerpo: ${extractedResults.length}`);
@@ -427,12 +489,12 @@ const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') =>
 // Search API Handler
 const handleSearchRequest = async (req, res) => {
   try {
-    const { keyword = 'Desarrollador', location = 'Buenos Aires' } = req.body || {};
+    const { keyword = 'Desarrollador', location = 'Buenos Aires', portals = null } = req.body || {};
     if (!keyword || !keyword.trim()) {
       return res.status(400).json({ error: 'Debes ingresar una palabra clave de búsqueda.' });
     }
 
-    const results = await deepScrapeArgentinaJobs(keyword, location);
+    const results = await deepScrapeArgentinaJobs(keyword, location, portals);
 
     return res.json({
       success: true,

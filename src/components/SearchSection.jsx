@@ -8,6 +8,7 @@ export default function SearchSection({ onSearch, isLoading }) {
     computrabajo: true,
     zonajobs: true,
     bumeran: true,
+    indeed: true,
     duckduckgo: true,
   });
 
@@ -43,6 +44,13 @@ export default function SearchSection({ onSearch, isLoading }) {
       description: 'bumeran.com.ar',
       badge: 'AR',
       color: 'text-purple-400',
+    },
+    {
+      id: 'indeed',
+      label: 'Indeed',
+      description: 'ar.indeed.com',
+      badge: 'AR',
+      color: 'text-indigo-400',
     },
     {
       id: 'duckduckgo',
