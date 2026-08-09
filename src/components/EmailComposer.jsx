@@ -41,7 +41,12 @@ export default function EmailComposer({
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      onUploadCV(file);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64Content = event.target.result.split(',')[1];
+        onUploadCV(file, base64Content);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -58,6 +63,9 @@ export default function EmailComposer({
         .replace(/{PUESTO}/g, testPuesto)
         .replace(/{EMPRESA}/g, testCompany)
         .replace(/{FUENTE}/g, sourceName),
+      cvFileName: cv ? cv.fileName : 'CV_Postulante.pdf',
+      cvFileType: cv ? cv.fileType || 'application/pdf' : 'application/pdf',
+      cvBase64Data: cv ? cv.base64Data : null,
       gmailUser,
       gmailAppPassword,
     });
@@ -87,7 +95,7 @@ export default function EmailComposer({
               </div>
               <p className="text-xs text-slate-400 mt-1">
                 {!isSimulationMode && hasGmailConfig
-                  ? `Conectado como ${gmailUser}. Los correos llegarán a la bandeja de entrada real del destinatario.`
+                  ? `Conectado como ${gmailUser}. Los correos se enviarán con tu CV adjunto.`
                   : 'Modo seguro para probar búsquedas sin consumir cuota de tu correo.'}
               </p>
             </div>
@@ -106,7 +114,7 @@ export default function EmailComposer({
         <div className="glass-panel p-6">
           <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
             <Paperclip className="w-5 h-5 text-cyan-400" />
-            1. Curriculum Vitae (CV Adjunto)
+            1. Curriculum Vitae (Archivo Adjunto a Enviar)
           </h3>
 
           <div className="border-2 border-dashed border-slate-700 hover:border-cyan-500/50 rounded-xl p-6 text-center transition-all bg-slate-900/40">
@@ -118,11 +126,13 @@ export default function EmailComposer({
                   </div>
                   <div className="text-left">
                     <div className="font-semibold text-white text-sm">{cv.fileName}</div>
-                    <div className="text-xs text-slate-400">CV preparado para adjuntar • {cv.size || 'Cargado'}</div>
+                    <div className="text-xs text-emerald-400 font-medium">
+                      ✓ Archivo cargado e integrado al envío de correo • {cv.size || 'Listo'}
+                    </div>
                   </div>
                 </div>
                 <label className="text-xs text-cyan-400 hover:underline cursor-pointer font-semibold">
-                  Cambiar
+                  Cambiar Archivo
                   <input type="file" onChange={handleFileChange} accept=".pdf,.docx,.doc" className="hidden" />
                 </label>
               </div>
@@ -130,7 +140,7 @@ export default function EmailComposer({
               <div>
                 <FileText className="w-10 h-10 text-slate-500 mx-auto mb-2" />
                 <p className="text-sm font-semibold text-white">Haz clic o arrastra tu CV aquí</p>
-                <p className="text-xs text-slate-400 mt-1">Soporta PDF o DOCX (Máx. 10MB)</p>
+                <p className="text-xs text-slate-400 mt-1">Formatos recomendados: PDF, DOCX (Máx. 10MB)</p>
                 <label className="mt-4 btn-secondary text-xs inline-block cursor-pointer">
                   Seleccionar Archivo CV
                   <input type="file" onChange={handleFileChange} accept=".pdf,.docx,.doc" className="hidden" />
@@ -187,7 +197,7 @@ export default function EmailComposer({
           <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
             <h4 className="font-bold text-white flex items-center gap-2 text-base">
               <Eye className="w-5 h-5 text-cyan-400" />
-              Vista Previa del Email
+              Vista Previa del Email a Enviar
             </h4>
             <span className="text-[11px] px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono">
               Píxel de Lectura Incluido 👁️
@@ -219,10 +229,10 @@ export default function EmailComposer({
                 .replace(/{FUENTE}/g, sourceName)}
             </div>
 
-            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center gap-2 bg-slate-900/60 p-2.5 rounded-lg">
+            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center gap-2 bg-slate-900/60 p-2.5 rounded-lg border border-emerald-500/30">
               <Paperclip className="w-4 h-4 text-emerald-400" />
               <span className="font-semibold text-emerald-300 text-xs">
-                {cv ? cv.fileName : 'CV_Mi_Perfil.pdf'} (Adjunto)
+                📎 Adjunto: {cv ? cv.fileName : 'CV_Mi_Perfil.pdf'}
               </span>
             </div>
           </div>
@@ -258,11 +268,11 @@ export default function EmailComposer({
               className="btn-primary w-full justify-center py-3.5 mt-2"
             >
               {isSending ? (
-                <>Enviando Correo...</>
+                <>Enviando Correo con CV Adjunto...</>
               ) : (
                 <>
                   <Send className="w-4 h-4" />
-                  {!isSimulationMode && hasGmailConfig ? 'Enviar Postulación Real vía Gmail' : 'Enviar Postulación de Prueba (Simulación)'}
+                  {!isSimulationMode && hasGmailConfig ? 'Enviar Postulación Real vía Gmail con CV' : 'Enviar Postulación de Prueba (Simulación)'}
                 </>
               )}
             </button>

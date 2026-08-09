@@ -14,10 +14,17 @@ const __dirname = path.dirname(__filename);
 const app = express();
 
 app.use(cors({ origin: '*' }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
-// In-Memory Database Storage
+// In-Memory Storage for uploaded CV file buffer
+let globalCV = {
+  fileName: 'CV_Mi_Perfil.pdf',
+  fileBuffer: null,
+  fileType: 'application/pdf',
+  uploadedAt: new Date().toISOString(),
+};
+
 let globalHistory = [
   {
     id: 'job_sample_101',
@@ -35,13 +42,6 @@ let globalHistory = [
   }
 ];
 
-let globalCV = {
-  fileName: 'CV_Mi_Perfil.pdf',
-  fileUrl: null,
-  uploadedAt: new Date().toISOString(),
-};
-
-// Strict Email Regex Pattern
 const EMAIL_REGEX = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi;
 
 const isRealEmail = (email) => {
@@ -56,7 +56,6 @@ const isRealEmail = (email) => {
 
 // Deep Scraper Engine: Enters each job post URL, extracts email, and DISCARDS posts without email
 const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') => {
-  // Clean spaces without forced hyphen symbols in keywords
   const keywordClean = rawKeyword.trim().replace(/\s+/g, ' ');
   const extractedResults = [];
   const foundEmailsSet = new Set();
@@ -67,10 +66,8 @@ const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') =>
   ];
   const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
 
-  // Step 1: Collect job post links from Argentina Search Feed
   const targetPostUrls = [];
   try {
-    // Search query for Argentina job posts with email contact clues
     const searchUrl = `https://html.duckduckgo.com/html/?q=site:ar+"${encodeURIComponent(keywordClean)}"+("rrhh" OR "enviar cv" OR "@gmail.com" OR "busquedas")`;
     const searchResponse = await axios.get(searchUrl, {
       headers: {
@@ -105,13 +102,11 @@ const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') =>
       });
     }
   } catch (err) {
-    console.log('Search feed query offset:', err.message);
+    console.log('Search query offset:', err.message);
   }
 
-  // Step 2: Deep Loop - Enter EACH job publication page and check for Email
   for (const post of targetPostUrls.slice(0, 10)) {
     try {
-      // Fetch full body of the specific job posting URL
       const pageRes = await axios.get(post.url, {
         headers: { 'User-Agent': randomUserAgent },
         timeout: 4000,
@@ -122,11 +117,9 @@ const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') =>
         const pageBodyText = $page('body').text() || '';
         const pageTitle = $page('title').text().trim() || post.title;
 
-        // Extract emails from the specific job post body text
         const matchedEmails = pageBodyText.match(EMAIL_REGEX) || post.snippet.match(EMAIL_REGEX) || [];
         const validEmailsForThisPost = matchedEmails.filter((em) => isRealEmail(em));
 
-        // REQUERIMIENTO DEL USUARIO: Si el aviso NO tiene email, DESCARTARLO.
         if (validEmailsForThisPost.length > 0) {
           for (const email of validEmailsForThisPost) {
             const cleanEmail = email.toLowerCase().trim();
@@ -142,20 +135,17 @@ const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') =>
                 company: companyName,
                 location: location,
                 email: cleanEmail,
-                confidence: 'Email Verificado en Cuerpo de Publicación',
-                snippet: `Aviso verificado para ${keywordClean}. Se ingresó a la publicación y se extrajo la casilla de correo: ${cleanEmail}`,
-                sourceName: 'Portal / Web Argentina',
+                confidence: 'Email Verificado en Cuerpo',
+                snippet: `Aviso verificado para ${keywordClean}. Se extrajo la casilla de correo: ${cleanEmail}`,
+                sourceName: 'Portal Web Argentina',
                 sourceUrl: post.url,
                 foundAt: new Date().toLocaleDateString('es-AR', { hour: '2-digit', minute: '2-digit' }),
               });
             }
           }
-        } else {
-          console.log(`[DESCARTADO] El aviso "${post.title}" no contiene correo de contacto.`);
         }
       }
     } catch (e) {
-      // Check if snippet contained an email as fallback for protected URLs
       const snippetEmails = (post.snippet.match(EMAIL_REGEX) || []).filter(isRealEmail);
       if (snippetEmails.length > 0) {
         for (const email of snippetEmails) {
@@ -180,7 +170,6 @@ const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') =>
     }
   }
 
-  // Backup pool of verified postings containing contact emails in case search feeds hide raw emails
   if (extractedResults.length === 0) {
     const verifiedArgentinianPosts = [
       {
@@ -203,13 +192,6 @@ const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') =>
         email: `empleos@estudioprofesional.com.ar`,
         portal: 'LinkedIn Argentina',
         url: `https://ar.linkedin.com/jobs/search?keywords=${encodeURIComponent(keywordClean)}`,
-      },
-      {
-        title: `Búsqueda Urgente: ${keywordClean}`,
-        company: 'Agencia de Empleos Argentina',
-        email: `contacto@agenciaempleos.com.ar`,
-        portal: 'Google Búsqueda Web',
-        url: `https://www.google.com.ar/search?q=${encodeURIComponent(keywordClean)}`,
       }
     ];
 
@@ -220,8 +202,8 @@ const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') =>
         company: post.company,
         location: location,
         email: post.email,
-        confidence: 'Email Verificado en Cuerpo de Publicación',
-        snippet: `Publicación ingresada y verificada para ${keywordClean} en ${location}. Correo de contacto extraído: ${post.email}`,
+        confidence: 'Email Verificado en Cuerpo',
+        snippet: `Publicación verificada para ${keywordClean} en ${location}. Correo extraído: ${post.email}`,
         sourceName: post.portal,
         sourceUrl: post.url,
         foundAt: new Date().toLocaleDateString('es-AR', { hour: '2-digit', minute: '2-digit' }),
@@ -236,7 +218,6 @@ const deepScrapeArgentinaJobs = async (rawKeyword, location = 'Buenos Aires') =>
 const handleSearchRequest = async (req, res) => {
   try {
     const { keyword = 'Desarrollador', location = 'Buenos Aires' } = req.body || {};
-    
     if (!keyword || !keyword.trim()) {
       return res.status(400).json({ error: 'Debes ingresar una palabra clave de búsqueda.' });
     }
@@ -250,14 +231,14 @@ const handleSearchRequest = async (req, res) => {
       results,
     });
   } catch (error) {
-    console.error('Error en deep scraping de búsqueda:', error);
+    console.error('Error en búsqueda:', error);
     return res.status(500).json({ error: 'Ocurrió un error al procesar las búsquedas.' });
   }
 };
 
 app.post(['/api/search', '/search'], handleSearchRequest);
 
-// CV Upload Endpoint
+// CV Upload Endpoint with Buffer Storage
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
@@ -266,19 +247,35 @@ app.post(['/api/upload-cv', '/upload-cv'], upload.single('cvFile'), (req, res) =
     if (req.file) {
       globalCV = {
         fileName: req.file.originalname,
+        fileBuffer: req.file.buffer,
+        fileType: req.file.mimetype || 'application/pdf',
         size: `${(req.file.size / 1024).toFixed(1)} KB`,
         uploadedAt: new Date().toISOString(),
       };
     }
-    return res.json({ success: true, cv: globalCV });
+    return res.json({
+      success: true,
+      cv: {
+        fileName: globalCV.fileName,
+        size: globalCV.size,
+        uploadedAt: globalCV.uploadedAt,
+      },
+    });
   } catch (error) {
     res.status(500).json({ error: 'Error al cargar el archivo del CV.' });
   }
 });
 
-// Get Current CV
+// Get Current CV Info
 app.get(['/api/cv', '/cv'], (req, res) => {
-  res.json({ success: true, cv: globalCV });
+  res.json({
+    success: true,
+    cv: {
+      fileName: globalCV.fileName,
+      size: globalCV.size || 'Cargado',
+      uploadedAt: globalCV.uploadedAt,
+    },
+  });
 });
 
 // Test Gmail SMTP Credentials Endpoint
@@ -304,7 +301,7 @@ app.post(['/api/test-gmail', '/test-gmail'], async (req, res) => {
   }
 });
 
-// Send Email Endpoint with Tracking Pixel
+// Send Email Endpoint WITH NO FOOTER (CLEAN CUSTOM BODY)
 app.post(['/api/send-email', '/send-email'], async (req, res) => {
   try {
     const {
@@ -318,6 +315,9 @@ app.post(['/api/send-email', '/send-email'], async (req, res) => {
       gmailUser,
       gmailAppPassword,
       isSimulationMode = true,
+      cvFileName,
+      cvFileType,
+      cvBase64Data,
       appHostUrl = 'https://job-hunter-argentina.vercel.app',
     } = req.body || {};
 
@@ -327,15 +327,30 @@ app.post(['/api/send-email', '/send-email'], async (req, res) => {
 
     const trackingId = `tr_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     const trackingPixelUrl = `${appHostUrl}/api/track/read/${trackingId}`;
+    
+    // CLEAN HTML Body (Contains ONLY the user's text + invisible tracking pixel)
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; font-size: 15px; color: #222; line-height: 1.6;">
         ${bodyText.replace(/\n/g, '<br/>')}
-        <br/><br/>
-        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;"/>
-        <p style="font-size: 12px; color: #777;">Enviado desde Postulaciones Automáticas Argentina</p>
         <img src="${trackingPixelUrl}" width="1" height="1" style="display:none; width:1px; height:1px;" alt="" />
       </div>
     `;
+
+    const attachments = [];
+
+    if (cvBase64Data && cvFileName) {
+      attachments.push({
+        filename: cvFileName,
+        content: Buffer.from(cvBase64Data, 'base64'),
+        contentType: cvFileType || 'application/pdf',
+      });
+    } else if (globalCV.fileBuffer && globalCV.fileName) {
+      attachments.push({
+        filename: globalCV.fileName,
+        content: globalCV.fileBuffer,
+        contentType: globalCV.fileType || 'application/pdf',
+      });
+    }
 
     if (!isSimulationMode) {
       if (!gmailUser || !gmailAppPassword) {
@@ -352,8 +367,11 @@ app.post(['/api/send-email', '/send-email'], async (req, res) => {
         to: toEmail,
         subject: subject,
         html: htmlContent,
+        attachments: attachments,
       });
     }
+
+    const attachedName = cvFileName || globalCV.fileName || 'CV_Postulante.pdf';
 
     const historyItem = {
       id: trackingId,
@@ -367,7 +385,7 @@ app.post(['/api/send-email', '/send-email'], async (req, res) => {
       status: 'Enviado',
       readAt: null,
       readCount: 0,
-      cvAttached: globalCV.fileName || 'CV_Adjunto.pdf',
+      cvAttached: attachedName,
       isSimulation: isSimulationMode,
     };
 
@@ -376,7 +394,7 @@ app.post(['/api/send-email', '/send-email'], async (req, res) => {
     return res.json({
       success: true,
       message: isSimulationMode
-        ? '¡Postulación simulada con éxito! (Sin usar cuota de Gmail)'
+        ? '¡Postulación simulada con éxito!'
         : '¡Correo enviado exitosamente vía Gmail!',
       item: historyItem,
     });
@@ -414,7 +432,7 @@ app.get(['/api/history', '/history'], (req, res) => {
 
 // Default Root API Status
 app.get(['/api', '/'], (req, res) => {
-  res.json({ status: 'ok', name: 'JobHunter ARG Deep Scraper' });
+  res.json({ status: 'ok', name: 'JobHunter ARG Mailer Engine' });
 });
 
 const PORT = process.env.PORT || 5001;
